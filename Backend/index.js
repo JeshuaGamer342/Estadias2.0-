@@ -1,240 +1,192 @@
-import pg from "pg";
 import express from 'express';
 import cors from 'cors';
+import axios from 'axios';
+import pg from 'pg';
+import fs from 'fs';
+import path from 'path';
+
+// Si existe un archivo .env en el backend y las variables no están definidas,
+// cargamos sus pares KEY=VALUE en process.env (no usamos dotenv para mantenerlo ligero).
+const dotenvPath = path.resolve(new URL('.', import.meta.url).pathname, '.env').replace(/^\/(.:\/)/, '$1');
+try {
+    if (fs.existsSync(dotenvPath)) {
+        const content = fs.readFileSync(dotenvPath, { encoding: 'utf8' });
+        content.split(/\r?\n/).forEach(line => {
+            const trimmed = line.trim();
+            if (!trimmed || trimmed.startsWith('#')) return;
+            const eq = trimmed.indexOf('=');
+            if (eq === -1) return;
+            const key = trimmed.slice(0, eq).trim();
+            let val = trimmed.slice(eq + 1).trim();
+            // quitar comillas si existen
+            if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
+                val = val.slice(1, -1);
+            }
+            if (!process.env[key]) process.env[key] = val;
+        });
+    }
+} catch (e) {
+    console.warn('No se pudo cargar .env automáticamente:', e.message);
+}
 
 const app = express();
 app.use(cors());
-app.use(express.json()); // Para poder recibir JSON en las peticiones
+app.use(express.json());
 
-export const pool = new pg.Pool({
-    user: "postgres",
-    host: "localhost",
-    database: "BD_Badabun",
-    password: "1234",
-    port: 5432,
-});
+// Ya no usamos Make/webhooks aquí — el backend habla directamente con Postgres.
 
-// Ruta de prueba para verificar que el servidor funciona
-app.get('/', (req, res) => {
-    res.json({ message: 'Servidor backend funcionando correctamente' });
-});
+// Configurar conexión a Postgres (no se usa dotenv aquí):
+// usa process.env.DATABASE_URL o las variables DB_USER/DB_HOST/DB_NAME/DB_PASSWORD/DB_PORT
+const pool = process.env.DATABASE_URL
+    ? new pg.Pool({ connectionString: process.env.DATABASE_URL })
+    : new pg.Pool({
+        user: process.env.DB_USER,
+        host: process.env.DB_HOST,
+        database: process.env.DB_NAME,
+        password: process.env.DB_PASSWORD,
+        port: process.env.DB_PORT ? Number(process.env.DB_PORT) : undefined,
+    });
 
-// Ruta de prueba para verificar conexión a la base de datos
-app.get('/api/id', async (req, res) => {
+// Test rápido de conexión a Postgres para detectar errores tempranos (credenciales, password type, etc.)
+(async () => {
     try {
-        const result = await pool.query('SELECT * FROM badabun');
-        res.json({
-            message: 'Conexión a base de datos exitosa',
-            data: result.rows
-        });
-    } catch (error) {
-        res.status(500).json({
-            message: 'Error de conexión a base de datos',
-            error: error.message
-        });
+        const client = await pool.connect();
+        await client.query('SELECT 1');
+        client.release();
+        console.log('Conexión a Postgres OK');
+    } catch (err) {
+        console.error('Error conectando a Postgres — revisa tus variables de entorno:', err.message);
+        // No forzamos shutdown para que puedas ver logs; opcionalmente podríamos process.exit(1)
     }
-});
+})();
 
-// Ruta para buscar por ID específico
-app.get('/api/badabun/:id', async (req, res) => {
-    try {
-        const { id } = req.params;
-        const result = await pool.query('SELECT * FROM badabun WHERE id_post = $1', [id]);
-
-        if (result.rows.length === 0) {
-            return res.status(404).json({
-                message: 'No se encontró ningún registro con ese ID'
-            });
-        }
-
-        res.json({
-            message: 'Registro encontrado',
-            data: result.rows[0]
-        });
-    } catch (error) {
-        res.status(500).json({
-            message: 'Error al buscar por ID',
-            error: error.message
-        });
-    }
+// Legacy route: redirige antiguas llamadas a /api/badabun/:id hacia /api/backup/:id
+app.get('/api/badabun/:id', (req, res) => {
+    const { id } = req.params;
+    // Redireccion interna (cliente recibirá 302)
+    return res.redirect(`/api/backup/${encodeURIComponent(id)}`);
 });
 
 // Ruta para buscar por fecha
 app.get('/api/buscar/fecha/:fecha', async (req, res) => {
     try {
         const { fecha } = req.params;
-        const result = await pool.query('SELECT * FROM badabun WHERE fecha = $1', [fecha]);
 
-        if (result.rows.length === 0) {
-            return res.status(404).json({
-                message: 'No se encontraron registros para esa fecha'
-            });
-        }
+        // Consultar en la DB (tabla 'backup')
+        const dbResult = await pool.query('SELECT * FROM backup WHERE fecha = $1 ORDER BY hora DESC', [fecha]);
 
-        res.json({
-            message: `Se encontraron ${result.rows.length} registros para la fecha ${fecha}`,
-            data: result.rows
-        });
+        // Log simple (antes estaba notificando a Make, ahora solo logueamos)
+        console.log('search_by_date', { fecha, count: dbResult.rows.length });
+
+        res.json({ message: `Se encontraron ${dbResult.rows.length} registros para la fecha ${fecha}`, data: dbResult.rows });
     } catch (error) {
         res.status(500).json({
-            message: 'Error al buscar por fecha',
+            message: 'Error al enviar búsqueda por fecha al webhook',
             error: error.message
         });
     }
 });
 
 // Ruta para buscar por rango de fechas
-app.get('/api/buscar/fechas', async (req, res) => {
+app.get('/api/backup/:id', async (req, res) => {
     try {
-        const { desde, hasta } = req.query;
+        const { id } = req.params;
+        // Primero intentamos obtener el registro desde Postgres (tabla 'backup')
+        const dbResult = await pool.query('SELECT * FROM backup WHERE id = $1 LIMIT 1', [id]);
 
-        if (!desde || !hasta) {
-            return res.status(400).json({
-                message: 'Se requieren los parámetros "desde" y "hasta"'
-            });
+        if (dbResult.rows && dbResult.rows.length > 0) {
+            const row = dbResult.rows[0];
+
+            // Enviar evento al webhook para registro/logging (no esperamos datos de vuelta ahora)
+            console.log('search_by_id', { id, source: 'postgres', found: true, table: 'backup' });
+
+            return res.json({ message: 'Registro encontrado', data: row });
         }
 
-        const result = await pool.query(
-            'SELECT * FROM badabun WHERE fecha BETWEEN $1 AND $2 ORDER BY fecha DESC',
-            [desde, hasta]
-        );
+        // Si no est\u00e1 en la DB, consulta al webhook externo como respaldo
+        const webhookUrl = `${MAKE_WEBHOOK_URL}?id=${encodeURIComponent(id)}`;
 
-        if (result.rows.length === 0) {
-            return res.status(404).json({
-                message: 'No se encontraron registros en el rango de fechas especificado'
-            });
-        }
-
-        res.json({
-            message: `Se encontraron ${result.rows.length} registros entre ${desde} y ${hasta}`,
-            data: result.rows
+        const response = await axios.get(webhookUrl, {
+            headers: {
+                'Accept': 'application/json',
+                'Content-Type': 'application/json'
+            },
+            timeout: 30000
         });
+
+        let originalData = response.data;
+        if (!originalData || (typeof originalData === 'object' && Object.keys(originalData).length === 0)) {
+            return res.status(404).json({ message: 'No se encontr\u00f3 ning\u00fan registro con ese ID' });
+        }
+
+        if (typeof originalData === 'string') {
+            try {
+                originalData = JSON.parse(originalData);
+            } catch (e) {
+                return res.status(500).json({ message: 'Error: El webhook devolvi\u00f3 datos en formato no v\u00e1lido', rawResponse: originalData });
+            }
+        }
+
+        if (Array.isArray(originalData)) originalData = originalData[0] || {};
+
+        // Intentar mapear campos b\u00e1sicos si vienen desde el webhook
+        const resultRow = {
+            id: originalData.id || originalData.ID || id,
+            titulo: originalData.titulo || originalData.TITULO || '',
+            editor: originalData.editor || originalData.EDITOR || '',
+            categoria: originalData.categoria || originalData.CATEGORIA || '',
+            formato: originalData.formato || originalData.FORMATO || '',
+            fecha: originalData.fecha || originalData.FECHA || '',
+            link: originalData.url || originalData.LINK || ''
+        };
+
+        console.log('search_by_id_fallback', { id, source: 'make_fallback', found: true, table: 'backup' });
+
+        return res.json({ message: 'Registro encontrado (desde webhook)', data: resultRow });
     } catch (error) {
-        res.status(500).json({
-            message: 'Error al buscar por rango de fechas',
-            error: error.message
-        });
+        console.error('Error al buscar por ID en Make.com:', error.message);
+        if (error.code === 'ECONNABORTED') {
+            res.status(504).json({
+                message: 'Timeout: El webhook de Make.com tard\u00f3 demasiado en responder'
+            });
+        } else if (error.response) {
+            console.error('Error response:', error.response.data);
+            res.status(error.response.status).json({
+                message: 'Error del webhook de Make.com',
+                error: error.response.data
+            });
+        } else {
+            res.status(500).json({
+                message: 'Error al realizar b\u00fasqueda por ID',
+                error: error.message
+            });
+        }
     }
 });
 
-// Ruta para buscar por keyword (en título)
-app.get('/api/buscar/keyword/:keyword', async (req, res) => {
+// Ruta para listar registros de la tabla 'backup' (opcional ?limit=N)
+app.get('/api/backup', async (req, res) => {
     try {
-        const { keyword } = req.params;
-        const result = await pool.query(
-            'SELECT * FROM badabun WHERE LOWER(titulo) LIKE LOWER($1)',
-            [`%${keyword}%`]
-        );
-
-        if (result.rows.length === 0) {
-            return res.status(404).json({
-                message: 'No se encontraron registros que contengan esa palabra clave'
-            });
-        }
-
-        res.json({
-            message: `Se encontraron ${result.rows.length} registros que contienen "${keyword}"`,
-            data: result.rows
-        });
+        const limit = req.query.limit ? Math.min(1000, Number(req.query.limit)) : 100; // to avoid huge responses
+        const dbResult = await pool.query('SELECT * FROM backup ORDER BY fecha DESC, hora DESC LIMIT $1', [limit]);
+        console.log('list_backup', { count: dbResult.rows.length, table: 'backup' });
+        res.json({ count: dbResult.rows.length, data: dbResult.rows });
     } catch (error) {
-        res.status(500).json({
-            message: 'Error al buscar por palabra clave',
-            error: error.message
-        });
+        console.error('Error al listar registros de backup:', error.message);
+        res.status(500).json({ message: 'Error al listar registros', error: error.message });
     }
 });
-
-// Ruta para buscar por categoría
-app.get('/api/buscar/categoria/:categoriaId', async (req, res) => {
-    try {
-        const { categoriaId } = req.params;
-        const result = await pool.query('SELECT * FROM badabun WHERE categoriaB = $1', [categoriaId]);
-
-        if (result.rows.length === 0) {
-            return res.status(404).json({
-                message: 'No se encontraron registros para esa categoría'
-            });
-        }
-
-        res.json({
-            message: `Se encontraron ${result.rows.length} registros para la categoría ${categoriaId}`,
-            data: result.rows
-        });
-    } catch (error) {
-        res.status(500).json({
-            message: 'Error al buscar por categoría',
-            error: error.message
-        });
-    }
-});
-
-// Ruta para buscar por plataforma
-app.get('/api/buscar/plataforma/:plataformaId', async (req, res) => {
-    try {
-        const { plataformaId } = req.params;
-        const result = await pool.query('SELECT * FROM badabun WHERE plataformaB = $1', [plataformaId]);
-
-        if (result.rows.length === 0) {
-            return res.status(404).json({
-                message: 'No se encontraron registros para esa plataforma'
-            });
-        }
-
-        res.json({
-            message: `Se encontraron ${result.rows.length} registros para la plataforma ${plataformaId}`,
-            data: result.rows
-        });
-    } catch (error) {
-        res.status(500).json({
-            message: 'Error al buscar por plataforma',
-            error: error.message
-        });
-    }
-});
-
-// Ruta para buscar por editor
-app.get('/api/buscar/editor/:editorId', async (req, res) => {
-    try {
-        const { editorId } = req.params;
-        const result = await pool.query('SELECT * FROM badabun WHERE editor = $1', [editorId]);
-
-        if (result.rows.length === 0) {
-            return res.status(404).json({
-                message: 'No se encontraron registros para ese editor'
-            });
-        }
-
-        res.json({
-            message: `Se encontraron ${result.rows.length} registros para el editor ${editorId}`,
-            data: result.rows
-        });
-    } catch (error) {
-        res.status(500).json({
-            message: 'Error al buscar por editor',
-            error: error.message
-        });
-    }
-});
-
 // Ruta para buscar por formato
 app.get('/api/buscar/formato/:formatoId', async (req, res) => {
     try {
         const { formatoId } = req.params;
-        const result = await pool.query('SELECT * FROM badabun WHERE formato = $1', [formatoId]);
 
-        if (result.rows.length === 0) {
-            return res.status(404).json({
-                message: 'No se encontraron registros para ese formato'
-            });
-        }
-
-        res.json({
-            message: `Se encontraron ${result.rows.length} registros para el formato ${formatoId}`,
-            data: result.rows
-        });
+        const dbResult = await pool.query('SELECT * FROM backup WHERE formato = $1 ORDER BY fecha DESC, hora DESC', [formatoId]);
+        console.log('search_by_format', { formatoId, count: dbResult.rows.length, table: 'backup' });
+        res.json({ message: `Se encontraron ${dbResult.rows.length} registros para el formato ${formatoId}`, data: dbResult.rows });
     } catch (error) {
         res.status(500).json({
-            message: 'Error al buscar por formato',
+            message: 'Error al enviar búsqueda por formato al webhook',
             error: error.message
         });
     }
@@ -243,79 +195,47 @@ app.get('/api/buscar/formato/:formatoId', async (req, res) => {
 // Ruta para búsqueda avanzada con múltiples filtros
 app.get('/api/buscar/avanzado', async (req, res) => {
     try {
-        const { categoria, plataforma, editor, formato, keyword, fechaDesde, fechaHasta } = req.query;
-
-        let query = 'SELECT * FROM badabun WHERE 1=1';
+        const { categoria, platforms, editor, formato, keyword, fechaDesde, fechaHasta } = req.query;
+        // Construir consulta SQL dinámica
+        let query = 'SELECT * FROM backup WHERE 1=1';
         const params = [];
-        let paramCount = 0;
+        let idx = 1;
 
-        if (categoria) {
-            paramCount++;
-            query += ` AND categoriaB = $${paramCount}`;
-            params.push(categoria);
+        if (categoria) { query += ` AND categoria = $${idx++}`; params.push(categoria); }
+        if (editor) { query += ` AND editor = $${idx++}`; params.push(editor); }
+        if (formato) { query += ` AND formato = $${idx++}`; params.push(formato); }
+        if (keyword) { query += ` AND LOWER(titulo) LIKE LOWER($${idx++})`; params.push(`%${keyword}%`); }
+        if (fechaDesde && fechaHasta) { query += ` AND fecha BETWEEN $${idx++} AND $${idx++}`; params.push(fechaDesde, fechaHasta); }
+        else if (fechaDesde) { query += ` AND fecha >= $${idx++}`; params.push(fechaDesde); }
+        else if (fechaHasta) { query += ` AND fecha <= $${idx++}`; params.push(fechaHasta); }
+
+        // platforms: CSV 'YT,IG' -> construir OR sobre columnas booleanas
+        if (platforms) {
+            const cols = platforms.split(',').map(s => s.trim()).filter(Boolean);
+            const allowed = ['YT', 'IG', 'TT', 'TH', 'X'];
+            const safeCols = cols.filter(c => allowed.includes(c));
+            if (safeCols.length > 0) {
+                const orConds = safeCols.map(c => `${c} = true`).join(' OR ');
+                query += ` AND (${orConds})`;
+            }
         }
 
-        if (plataforma) {
-            paramCount++;
-            query += ` AND plataformaB = $${paramCount}`;
-            params.push(plataforma);
-        }
+        query += ' ORDER BY fecha DESC, hora DESC';
 
-        if (editor) {
-            paramCount++;
-            query += ` AND editor = $${paramCount}`;
-            params.push(editor);
-        }
+        const dbResult = await pool.query(query, params);
+        console.log('advanced_search', { filters: { categoria, plataforma, editor, formato, keyword, fechaDesde, fechaHasta }, count: dbResult.rows.length });
 
-        if (formato) {
-            paramCount++;
-            query += ` AND formato = $${paramCount}`;
-            params.push(formato);
-        }
-
-        if (keyword) {
-            paramCount++;
-            query += ` AND LOWER(titulo) LIKE LOWER($${paramCount})`;
-            params.push(`%${keyword}%`);
-        }
-
-        if (fechaDesde && fechaHasta) {
-            paramCount += 2;
-            query += ` AND fecha BETWEEN $${paramCount - 1} AND $${paramCount}`;
-            params.push(fechaDesde, fechaHasta);
-        } else if (fechaDesde) {
-            paramCount++;
-            query += ` AND fecha >= $${paramCount}`;
-            params.push(fechaDesde);
-        } else if (fechaHasta) {
-            paramCount++;
-            query += ` AND fecha <= $${paramCount}`;
-            params.push(fechaHasta);
-        }
-
-        query += ' ORDER BY fecha DESC';
-
-        const result = await pool.query(query, params);
-
-        if (result.rows.length === 0) {
-            return res.status(404).json({
-                message: 'No se encontraron registros con los criterios especificados'
-            });
-        }
-
-        res.json({
-            message: `Se encontraron ${result.rows.length} registros`,
-            filtros: { categoria, plataforma, editor, formato, keyword, fechaDesde, fechaHasta },
-            data: result.rows
-        });
+        res.json({ message: `Se encontraron ${dbResult.rows.length} registros`, filtros: { categoria, plataforma, editor, formato, keyword, fechaDesde, fechaHasta }, data: dbResult.rows });
     } catch (error) {
         res.status(500).json({
-            message: 'Error en la búsqueda avanzada',
+            message: 'Error al enviar búsqueda avanzada al webhook',
             error: error.message
         });
     }
 });
 
-app.listen(3001, () => {
-    console.log('Servidor corriendo en http://localhost:3001');
+const PORT = process.env.PORT || 3001;
+
+app.listen(PORT, () => {
+    console.log(`Servidor corriendo en http://localhost:${PORT}`);
 });
