@@ -1,0 +1,17 @@
+{
+    "name": "badabun-project",
+    "version": "1.0.0",
+    "description": "Sistema de búsqueda Badabun",
+    "scripts": {
+        "dev": "concurrently \"cd Backend && npm run dev\" \"cd frontend && npm run dev\"",
+        "start": "cd Backend && npm start",
+        "start:unified": "npm run build:frontend && cd Backend && npm start",
+        "build": "cd frontend && npm run build",
+        "build:frontend": "cd frontend && npm run build",
+        "install-all": "cd Backend && npm install && cd ../frontend && npm install",
+        "production": "npm run build:frontend && cd Backend && node index.js"
+    },
+    "devDependencies": {
+        "concurrently": "^8.2.2"
+    }
+}
