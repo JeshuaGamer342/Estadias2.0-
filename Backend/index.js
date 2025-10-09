@@ -1,7 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import axios from 'axios';
-import pg from 'pg';
+import mysql from 'mysql2/promise';
 import fs from 'fs';
 import path from 'path';
 
@@ -33,44 +33,83 @@ try {
 }
 
 const app = express();
-app.use(cors());
+
+// Configuración CORS para Hostinger
+app.use(cors({
+    origin: [
+        'http://localhost:5173',                    // Vite dev server
+        'http://localhost:3000',                    // React dev server alternativo  
+        'https://socialmediabada.com',         // Tu dominio principal de Hostinger
+        'https://www.socialmediabada.com',     // Con www
+        // Agregar más subdominios si los usas
+    ],
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    credentials: false, // cambiar a true si usas cookies/sesión
+    allowedHeaders: ['Content-Type', 'Authorization']
+}));
+
 app.use(express.json());
 
 // Ya no usamos Make/webhooks aquí — el backend habla directamente con Postgres.
 
-// Configurar conexión a Postgres (no se usa dotenv aquí):
-// usa process.env.DATABASE_URL o las variables DB_USER/DB_HOST/DB_NAME/DB_PASSWORD/DB_PORT
-const pool = process.env.DATABASE_URL
-    ? new pg.Pool({ connectionString: process.env.DATABASE_URL })
-    : new pg.Pool({
-        user: process.env.DB_USER,
-        host: process.env.DB_HOST,
-        // aceptar DB_NAME o DB_DATABASE según tu .env
-        database: process.env.DB_NAME || process.env.DB_DATABASE,
-        // asegurar que la contraseña sea string (evita 'client password must be a string')
-        password: process.env.DB_PASSWORD ? String(process.env.DB_PASSWORD) : undefined,
-        port: process.env.DB_PORT ? Number(process.env.DB_PORT) : undefined,
-    });
-
-// Debug: mostrar qué variables críticas están definidas (no mostrar la contraseña)
-console.log('DB env:', {
-    DB_USER: !!process.env.DB_USER,
-    DB_NAME: !!(process.env.DB_NAME || process.env.DB_DATABASE),
-    DB_HOST: !!process.env.DB_HOST,
-    DB_PORT: !!process.env.DB_PORT,
-    DATABASE_URL: !!process.env.DATABASE_URL,
-    DB_PASSWORD_defined: !!process.env.DB_PASSWORD
+// Configurar conexión a MySQL con mejor manejo de errores:
+const pool = mysql.createPool({
+    host: process.env.DB_HOST,
+    user: process.env.DB_USER,
+    password: process.env.DB_PASSWORD,
+    database: process.env.DB_DATABASE,
+    port: process.env.DB_PORT ? Number(process.env.DB_PORT) : 3306,
+    waitForConnections: true,
+    connectionLimit: 10,
+    queueLimit: 0,
+    acquireTimeout: 60000,
+    timeout: 60000,
+    reconnect: true
 });
 
-// Test rápido de conexión a Postgres para detectar errores tempranos (credenciales, password type, etc.)
+// Test de conexión mejorado
 (async () => {
     try {
-        const client = await pool.connect();
-        await client.query('SELECT 1');
-        client.release();
-        console.log('Conexión a Postgres OK');
+        console.log('Probando conexión a MySQL...');
+        console.log('Host:', process.env.DB_HOST);
+        console.log('User:', process.env.DB_USER);
+        console.log('Database:', process.env.DB_DATABASE);
+        console.log('Port:', process.env.DB_PORT);
+
+        const connection = await pool.getConnection();
+        console.log('✅ Conexión a MySQL exitosa');
+
+        // Test simple para verificar que la tabla existe
+        const [rows] = await connection.execute('SHOW TABLES LIKE "backup"');
+        if (rows.length > 0) {
+            console.log('✅ Tabla "backup" encontrada');
+        } else {
+            console.log('⚠️ Tabla "backup" no encontrada - puede que necesites crear la estructura');
+        }
+
+        connection.release();
+    } catch (error) {
+        console.error('❌ Error conectando a MySQL — revisa tus variables de entorno:', error.message);
+        console.error('Código de error:', error.code);
+        if (error.code === 'ER_ACCESS_DENIED_ERROR') {
+            console.error('🔑 Problema de autenticación - verifica usuario y contraseña');
+        } else if (error.code === 'ENOTFOUND') {
+            console.error('🌐 No se puede resolver el host - verifica la dirección del servidor');
+        } else if (error.code === 'ECONNREFUSED') {
+            console.error('🚫 Conexión rechazada - verifica el puerto y que el servidor esté activo');
+        }
+    }
+})();
+
+// Test rápido de conexión a MySQL para detectar errores tempranos
+(async () => {
+    try {
+        const connection = await pool.getConnection();
+        await connection.execute('SELECT 1');
+        connection.release();
+        console.log('Conexión a MySQL OK');
     } catch (err) {
-        console.error('Error conectando a Postgres — revisa tus variables de entorno:', err.message);
+        console.error('Error conectando a MySQL — revisa tus variables de entorno:', err.message);
         // No forzamos shutdown para que puedas ver logs; opcionalmente podríamos process.exit(1)
     }
 })();
@@ -88,12 +127,12 @@ app.get('/api/buscar/fecha/:fecha', async (req, res) => {
         const { fecha } = req.params;
 
         // Consultar en la DB (tabla 'backup')
-        const dbResult = await pool.query('SELECT * FROM backup WHERE fecha = $1 ORDER BY hora DESC', [fecha]);
+        const [dbResult] = await pool.execute('SELECT * FROM backup WHERE fecha = ? ORDER BY hora DESC', [fecha]);
 
         // Log simple (antes estaba notificando a Make, ahora solo logueamos)
-        console.log('search_by_date', { fecha, count: dbResult.rows.length });
+        console.log('search_by_date', { fecha, count: dbResult.length });
 
-        res.json({ message: `Se encontraron ${dbResult.rows.length} registros para la fecha ${fecha}`, data: dbResult.rows });
+        res.json({ message: `Se encontraron ${dbResult.length} registros para la fecha ${fecha}`, data: dbResult });
     } catch (error) {
         res.status(500).json({
             message: 'Error al enviar búsqueda por fecha al webhook',
@@ -106,14 +145,14 @@ app.get('/api/buscar/fecha/:fecha', async (req, res) => {
 app.get('/api/backup/:id', async (req, res) => {
     try {
         const { id } = req.params;
-        // Primero intentamos obtener el registro desde Postgres (tabla 'backup')
-        const dbResult = await pool.query('SELECT * FROM backup WHERE id = $1 LIMIT 1', [id]);
+        // Primero intentamos obtener el registro desde MySQL (tabla 'backup')
+        const dbResult = await pool.execute('SELECT * FROM backup WHERE id = ? LIMIT 1', [id]);
 
-        if (dbResult.rows && dbResult.rows.length > 0) {
-            const row = dbResult.rows[0];
+        if (dbResult && dbResult.length > 0) {
+            const row = dbResult[0];
 
             // Enviar evento al webhook para registro/logging (no esperamos datos de vuelta ahora)
-            console.log('search_by_id', { id, source: 'postgres', found: true, table: 'backup' });
+            console.log('search_by_id', { id, source: 'mysql', found: true, table: 'backup' });
 
             return res.json({ message: 'Registro encontrado', data: row });
         }
@@ -145,8 +184,8 @@ app.get('/api/backup/:id', async (req, res) => {
 app.get('/api/backup', async (req, res) => {
     try {
         const limit = req.query.limit ? Number(req.query.limit) : 100;
-        const dbResult = await pool.query('SELECT * FROM backup ORDER BY fecha DESC, hora DESC LIMIT $1', [limit]);
-        return res.json({ count: dbResult.rows.length, data: dbResult.rows });
+        const dbResult = await pool.execute('SELECT * FROM backup ORDER BY fecha DESC, hora DESC LIMIT ?', [limit]);
+        return res.json({ count: dbResult.length, data: dbResult });
     } catch (error) {
         console.error('Error en /api/backup:', error.message);
         return res.status(500).json({ message: 'Error listando registros', error: error.message });
@@ -158,9 +197,10 @@ app.get('/api/buscar/keyword/:keyword', async (req, res) => {
     try {
         const { keyword } = req.params;
         if (!keyword) return res.status(400).json({ message: 'keyword requerida' });
+        // Búsqueda por keyword en el título usando LIKE en lugar de función PostgreSQL
         const q = `%${keyword}%`;
-        const dbResult = await pool.query('SELECT * FROM busqueda_titulo ($1)', [q]);
-        return res.json({ count: dbResult.rows.length, data: dbResult.rows });
+        const dbResult = await pool.execute('SELECT * FROM backup WHERE titulo LIKE ?', [q]);
+        return res.json({ count: dbResult.length, data: dbResult });
     } catch (error) {
         console.error('Error en /api/buscar/keyword:', error.message);
         return res.status(500).json({ message: 'Error en búsqueda por keyword', error: error.message });
@@ -220,11 +260,12 @@ app.get('/api/buscar/categoria/:categoria', async (req, res) => {
         // Si la función no devolvió nada, hacemos un fallback a la consulta directa sobre la tabla
         if (!dbResult) {
             console.log('Falling back to direct table query for categoria:', categoria);
-            dbResult = await pool.query('SELECT * FROM busqueda_categoria($1)', [categoria]);
+            // Buscar directamente por categoría usando LIKE en lugar de función PostgreSQL  
+            dbResult = await pool.execute('SELECT * FROM backup WHERE categoria LIKE ?', [`%${categoria}%`]);
             used = 'fallback_table_query';
         }
 
-        res.json({ method: used, count: dbResult.rows.length, data: dbResult.rows });
+        res.json({ method: used, count: dbResult.length, data: dbResult });
     } catch (error) {
         console.error('Error en /api/buscar/categoria:', error.message);
         res.status(500).json({ message: 'Error en búsqueda por categoría', error: error.message });
@@ -244,11 +285,11 @@ app.get('/api/buscar/fechas', async (req, res) => {
             return res.status(400).json({ message: 'Formato de fecha inválido, use YYYY-MM-DD' });
         }
 
-        const dbResult = await pool.query('SELECT * FROM backup WHERE fecha BETWEEN $1 AND $2 ORDER BY fecha DESC, hora DESC', [desde, hasta]);
+        const dbResult = await pool.execute('SELECT * FROM backup WHERE fecha BETWEEN ? AND ? ORDER BY fecha DESC, hora DESC', [desde, hasta]);
 
         // Si el cliente solicita CSV, lo generamos y lo devolvemos
         if (format && format.toLowerCase() === 'csv') {
-            const rows = dbResult.rows;
+            const rows = dbResult;
             if (!rows || rows.length === 0) {
                 res.setHeader('Content-Type', 'text/csv');
                 res.setHeader('Content-Disposition', `attachment; filename="backup_${desde}_to_${hasta}.csv"`);
@@ -278,7 +319,7 @@ app.get('/api/buscar/fechas', async (req, res) => {
         }
 
         // Por defecto devolver JSON con las filas tal cual
-        return res.json({ count: dbResult.rows.length, data: dbResult.rows });
+        return res.json({ count: dbResult.length, data: dbResult });
     } catch (error) {
         console.error('Error en /api/buscar/fechas:', error.message);
         return res.status(500).json({ message: 'Error en búsqueda por rango de fechas', error: error.message });
