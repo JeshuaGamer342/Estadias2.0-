@@ -1,4 +1,4 @@
-import axios from "axios";
+import api from "./apiConfig";
 
 // Función para buscar un registro por ID
 export async function getId(id) {
@@ -9,7 +9,7 @@ export async function getId(id) {
         }
 
         // Hacer petición al backend
-        const response = await axios.get(`/api/backup/${id}`);
+        const response = await api.get(`/api/backup/${id}`);
 
         console.log('Registro encontrado:', response.data);
         return response.data;
@@ -35,7 +35,7 @@ export async function getId(id) {
 export async function getBada() {
     try {
         // Obtener lista de registros desde la nueva ruta /api/backup
-        const response = await axios.get('/api/backup');
+        const response = await api.get('/api/backup');
 
         console.log('Todos los registros:', response.data);
         return response.data;

@@ -1,4 +1,4 @@
-import axios from "axios";
+import api from "./apiConfig";
 
 // ============= BÚSQUEDAS POR LLAVES FORÁNEAS =============
 
@@ -8,7 +8,7 @@ export async function getByCategoria(categoriaId) {
         if (!categoriaId) {
             throw new Error('El ID de categoría es requerido');
         }
-        const response = await axios.get(`/api/buscar/categoria/${categoriaId}`);
+        const response = await api.get(`/api/buscar/categoria/${categoriaId}`);
         return response.data;
     } catch (error) {
         handleError(error, 'Error al buscar por categoría');
@@ -21,7 +21,7 @@ export async function getByEditor(editorId) {
         if (!editorId) {
             throw new Error('El ID de editor es requerido');
         }
-        const response = await axios.get(`/api/buscar/editor/${editorId}`);
+        const response = await api.get(`/api/buscar/editor/${editorId}`);
         return response.data;
     } catch (error) {
         handleError(error, 'Error al buscar por editor');
@@ -34,7 +34,7 @@ export async function getByFormato(formatoId) {
         if (!formatoId) {
             throw new Error('El ID de formato es requerido');
         }
-        const response = await axios.get(`/api/buscar/formato/${formatoId}`);
+        const response = await api.get(`/api/buscar/formato/${formatoId}`);
         return response.data;
     } catch (error) {
         handleError(error, 'Error al buscar por formato');
@@ -50,7 +50,7 @@ export async function getByFecha(fecha) {
             throw new Error('La fecha es requerida');
         }
         validateDateFormat(fecha);
-        const response = await axios.get(`/api/buscar/fecha/${fecha}`);
+        const response = await api.get(`/api/buscar/fecha/${fecha}`);
         return response.data;
     } catch (error) {
         handleError(error, 'Error al buscar por fecha');
@@ -67,7 +67,7 @@ export async function getByRangoFechas(fechaDesde, fechaHasta) {
         validateDateFormat(fechaHasta);
         validateDateRange(fechaDesde, fechaHasta);
 
-        const response = await axios.get(`/api/buscar/fechas?desde=${fechaDesde}&hasta=${fechaHasta}`);
+        const response = await api.get(`/api/buscar/fechas?desde=${fechaDesde}&hasta=${fechaHasta}`);
         return response.data;
     } catch (error) {
         handleError(error, 'Error al buscar por rango de fechas');
@@ -86,7 +86,7 @@ export async function getByKeyword(keyword) {
             throw new Error('La palabra clave debe tener al menos 2 caracteres');
         }
 
-        const response = await axios.get(`/api/buscar/keyword/${encodeURIComponent(keyword)}`);
+        const response = await api.get(`/api/buscar/keyword/${encodeURIComponent(keyword)}`);
         return response.data;
     } catch (error) {
         handleError(error, 'Error al buscar por palabra clave');

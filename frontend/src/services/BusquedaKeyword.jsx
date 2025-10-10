@@ -1,4 +1,4 @@
-import axios from "axios";
+import api from "./apiConfig";
 
 // Función para buscar registros por palabra clave (keyword)
 export async function getByKeyword(keyword) {
@@ -14,7 +14,7 @@ export async function getByKeyword(keyword) {
         }
 
         // Hacer petición al backend
-        const response = await axios.get(`/api/buscar/keyword/${encodeURIComponent(keyword)}`);
+        const response = await api.get(`/api/buscar/keyword/${encodeURIComponent(keyword)}`);
 
         console.log('Registros encontrados por palabra clave:', response.data);
         return response.data;

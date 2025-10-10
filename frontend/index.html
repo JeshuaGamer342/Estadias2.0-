@@ -1,13 +1,34 @@
 <!doctype html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>frontend</title>
-  </head>
-  <body>
-    <div id="root"></div>
-    <script type="module" src="/src/main.jsx"></script>
-  </body>
+
+<head>
+  <meta charset="UTF-8" />
+  <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Badabun Social Media App</title>
+  <script>
+    // Script de debugging para detectar errores en producción
+    window.addEventListener('error', function (e) {
+      console.error('Error detectado:', e.error);
+    });
+
+    // Verificar que React se carga correctamente
+    console.log('Iniciando aplicación...');
+  </script>
+</head>
+
+<body>
+  <div id="root">
+    <!-- Mensaje de fallback mientras carga React -->
+    <div
+      style="display: flex; justify-content: center; align-items: center; height: 100vh; font-family: Arial, sans-serif;">
+      <div>
+        <h3>Cargando aplicación...</h3>
+        <p>Si este mensaje persiste, puede haber un problema de carga.</p>
+      </div>
+    </div>
+  </div>
+  <script type="module" src="/src/main.jsx"></script>
+</body>
+
 </html>

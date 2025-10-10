@@ -5,6 +5,8 @@ import react from '@vitejs/plugin-react'
 export default defineConfig({
   plugins: [react()],
   server: {
+    // Proxy solo para desarrollo - redirige /api/* a localhost:3001
+    // En producción se usa VITE_API_URL
     proxy: {
       '/api': {
         target: 'http://localhost:3001',
@@ -25,6 +27,6 @@ export default defineConfig({
       }
     }
   },
-  // Configuración para que funcione correctamente cuando se sirva desde el backend
-  base: './'
+  // Configuración para que funcione correctamente en Hostinger
+  base: '/'
 })

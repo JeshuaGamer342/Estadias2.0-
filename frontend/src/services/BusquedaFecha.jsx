@@ -1,4 +1,4 @@
-import axios from "axios";
+import api from "./apiConfig";
 
 // Función para buscar registros por fecha específica
 export async function getByFecha(fecha) {
@@ -15,7 +15,7 @@ export async function getByFecha(fecha) {
         }
 
         // Hacer petición al backend
-        const response = await axios.get(`/api/buscar/fecha/${fecha}`);
+        const response = await api.get(`/api/buscar/fecha/${fecha}`);
 
         console.log('Registros encontrados por fecha:', response.data);
         return response.data;
@@ -57,7 +57,7 @@ export async function getByRangoFechas(fechaDesde, fechaHasta) {
         }
 
         // Hacer petición al backend
-        const response = await axios.get(`/api/buscar/fechas?desde=${fechaDesde}&hasta=${fechaHasta}`);
+        const response = await api.get(`/api/buscar/fechas?desde=${fechaDesde}&hasta=${fechaHasta}`);
 
         console.log('Registros encontrados por rango de fechas:', response.data);
         return response.data;

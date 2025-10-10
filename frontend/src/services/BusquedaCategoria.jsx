@@ -1,4 +1,4 @@
-import axios from "axios";
+import api from "./apiConfig";
 
 // Función para buscar registros por categoría
 export async function getByCategoria(categoriaId) {
@@ -9,7 +9,7 @@ export async function getByCategoria(categoriaId) {
         }
 
         // Hacer petición al backend
-        const response = await axios.get(`/api/buscar/categoria/${categoriaId}`);
+        const response = await api.get(`/api/buscar/categoria/${categoriaId}`);
 
         console.log('Registros encontrados por categoría:', response.data);
         return response.data;
@@ -38,7 +38,7 @@ export async function getByEditor(editorId) {
             throw new Error('El ID de editor es requerido');
         }
 
-        const response = await axios.get(`/api/buscar/editor/${editorId}`);
+        const response = await api.get(`/api/buscar/editor/${editorId}`);
 
         console.log('Registros encontrados por editor:', response.data);
         return response.data;
@@ -64,7 +64,7 @@ export async function getByFormato(formatoId) {
             throw new Error('El ID de formato es requerido');
         }
 
-        const response = await axios.get(`/api/buscar/formato/${formatoId}`);
+        const response = await api.get(`/api/buscar/formato/${formatoId}`);
 
         console.log('Registros encontrados por formato:', response.data);
         return response.data;

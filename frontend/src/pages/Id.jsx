@@ -161,28 +161,28 @@ const Id = () => {
                     <h3>Resultado de la Búsqueda por ID</h3>
                     <div className="result-card">
                         <div className="result-header">
-                            <span className="result-id">ID: {result.data?.id_post}</span>
-                            <span className="result-date">{getDate(result.data)}</span>
+                            <span className="result-id">ID: {result.data?.[0]?.id_post}</span>
+                            <span className="result-date">{getDate(result.data?.[0])}</span>
                         </div>
 
-                        <h4>{result.data?.titulo}</h4>
-                        <p><strong>Editor:</strong> {result.data?.editor}</p>
-                        <p><strong>Categoría:</strong> {result.data?.categoria}</p>
-                        <p><strong>Formato:</strong> {result.data?.formato}</p>
-                        <p><strong>Hora:</strong> {result.data?.hora || result.data?.HORA}</p>
-                        <p><strong>Versión:</strong> {result.data?.version || result.data?.VERSION}</p>
+                        <h4>{result.data?.[0]?.titulo}</h4>
+                        <p><strong>Editor:</strong> {result.data?.[0]?.editor}</p>
+                        <p><strong>Categoría:</strong> {result.data?.[0]?.categoria}</p>
+                        <p><strong>Formato:</strong> {result.data?.[0]?.formato}</p>
+                        <p><strong>Hora:</strong> {result.data?.[0]?.hora || result.data?.[0]?.HORA}</p>
+                        <p><strong>Versión:</strong> {result.data?.[0]?.version || result.data?.[0]?.VERSION}</p>
 
                         <div className="platform-flags">
-                            <p><strong>YT:</strong> {formatBool(result.data?.yt || result.data?.YT)}</p>
-                            <p><strong>IG:</strong> {formatBool(result.data?.ig || result.data?.IG)}</p>
-                            <p><strong>TT:</strong> {formatBool(result.data?.tt || result.data?.TT)}</p>
-                            <p><strong>TH:</strong> {formatBool(result.data?.th || result.data?.TH)}</p>
-                            <p><strong>X:</strong> {formatBool(result.data?.x || result.data?.X)}</p>
+                            <p><strong>YT:</strong> {formatBool(result.data?.[0]?.yt || result.data?.[0]?.YT)}</p>
+                            <p><strong>IG:</strong> {formatBool(result.data?.[0]?.ig || result.data?.[0]?.IG)}</p>
+                            <p><strong>TT:</strong> {formatBool(result.data?.[0]?.tt || result.data?.[0]?.TT)}</p>
+                            <p><strong>TH:</strong> {formatBool(result.data?.[0]?.th || result.data?.[0]?.TH)}</p>
+                            <p><strong>X:</strong> {formatBool(result.data?.[0]?.x || result.data?.[0]?.X)}</p>
                         </div>
 
-                        {(result.data?.url || result.data?.link || result.data?.LINK) && (
+                        {(result.data?.[0]?.url || result.data?.[0]?.link || result.data?.[0]?.LINK) && (
                             <a
-                                href={result.data?.url || result.data?.link || result.data?.LINK}
+                                href={result.data?.[0]?.url || result.data?.[0]?.link || result.data?.[0]?.LINK}
                                 target="_blank"
                                 rel="noopener noreferrer"
                                 className="result-link"
@@ -199,17 +199,19 @@ const Id = () => {
                     <h3>Todos los Registros ({allRecords.data?.length || 0})</h3>
                     <div className="results-grid">
                         {allRecords.data?.map((record, index) => (
-                            <div key={record.id_post || index} className="result-card">
+                            <div key={record.id || record.id_post || index} className="result-card">
                                 <div className="result-header">
-                                    <span className="result-id">ID: {record.id_post}</span>
+                                    <span className="result-id">ID: {record.id || record.id_post}</span>
                                     <span className="result-date">{getDate(record)}</span>
                                 </div>
                                 <h4>{record.titulo}</h4>
-                                <p><strong>Editor:</strong> {record.editor}</p>
-                                <p><strong>Categoria:</strong> {record.categoria}</p>
-                                <p><strong>Formato:</strong> {record.formato}</p>
-                                <p><strong>Hora:</strong> {record.hora || record.HORA}</p>
-                                <p><strong>Versión:</strong> {record.version || record.VERSION}</p>
+                                <div className="result-details">
+                                    <p><strong>Editor:</strong> {record.editor}</p>
+                                    <p><strong>Categoría:</strong> {record.categoria}</p>
+                                    <p><strong>Formato:</strong> {record.formato}</p>
+                                    <p><strong>Hora:</strong> {record.hora || record.HORA}</p>
+                                    <p><strong>Versión:</strong> {record.version || record.VERSION}</p>
+                                </div>
 
                                 <div className="platform-flags">
                                     <p><strong>YT:</strong> {formatBool(record.yt || record.YT)}</p>

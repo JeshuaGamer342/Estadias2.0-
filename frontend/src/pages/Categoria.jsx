@@ -91,7 +91,7 @@ const Categoria = () => {
                         type="text"
                         value={searchId}
                         onChange={(e) => setSearchId(e.target.value)}
-                        placeholder="Ingresa el ID de la categoría (ej: 1, 2, 3...)"
+                        placeholder="Ingresa alguna categoría válida"
                         className="search-input"
                         onKeyPress={(e) => e.key === 'Enter' && handleSearch()}
                     />
@@ -141,9 +141,9 @@ const Categoria = () => {
                     {results.data && results.data.length > 0 ? (
                         <div className="results-grid">
                             {results.data.map((record, index) => (
-                                <div key={record.id_post || index} className="result-card">
+                                <div key={record.id || record.id_post || index} className="result-card">
                                     <div className="result-header">
-                                        <span className="result-id">ID: {record.id_post}</span>
+                                        <span className="result-id">ID: {record.id || record.id_post}</span>
                                         <span className="result-date">{getDate(record)}</span>
                                     </div>
                                     <h4>{record.titulo}</h4>
